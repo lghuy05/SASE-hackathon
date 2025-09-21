@@ -12,9 +12,9 @@ const USFDashboard = () => {
 
   // Mock data
   const user = {
-    name: "Alex Rodriguez",
+    name: "Yui",
     major: "Computer Science",
-    year: "Junior",
+    year: "Freshman",
     avatar: "/api/placeholder/40/40"
   };
 
