@@ -58,7 +58,7 @@ export default function LoginPage() {
         setErrors({ general: error.message })
       } else {
         // The auth callback will handle the redirect based on profile status
-        router.push('/auth/callback')
+        router.push('/dashboard')
       }
     } catch (error) {
       console.error('Unexpected error:', error)
