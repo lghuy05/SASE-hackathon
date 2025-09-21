@@ -1,7 +1,8 @@
 
 // ...existing code before Supabase-powered dashboard...
-'use client'
+ 'use client'
 import React, { useState, useEffect, useRef, ChangeEvent, FormEvent } from 'react';
+import Link from 'next/link';
 import { createClient } from '@/lib/supabase/client';
 import {
   Home, Briefcase, Users, MessageCircle, Calendar, Bell, Search,
@@ -13,12 +14,17 @@ const USFDashboard = () => {
   const [activeTab, setActiveTab] = useState('jobs');
   const [showNotifications, setShowNotifications] = useState(false);
 
-  // Mock data
-  const user = {
-    name: "Yui",
-    major: "Computer Science",
-    year: "Freshman",
-    avatar: "/api/placeholder/40/40"
+  // Profile loaded from DB
+  const [profileUser, setProfileUser] = useState<{ full_name?: string; major?: string; graduation_year?: number; profile_picture_url?: string } | null>(null);
+
+  const getYearTitle = (gradYear?: number | null) => {
+    if (!gradYear) return 'Student';
+    const currentYear = new Date().getFullYear();
+    const yearsLeft = gradYear - currentYear;
+    if (yearsLeft <= 1) return 'Senior';
+    if (yearsLeft <= 2) return 'Junior';
+    if (yearsLeft <= 3) return 'Sophomore';
+    return 'Freshman';
   };
 
   type JobPost = {
@@ -70,6 +76,32 @@ const USFDashboard = () => {
 
   // Supabase client
   const supabase = createClient();
+
+  // Load current user's profile into profileUser
+  useEffect(() => {
+    let mounted = true;
+    const loadProfile = async () => {
+      try {
+        const { data: userData, error: userErr } = await supabase.auth.getUser();
+        if (userErr) {
+          console.error('supabase getUser error', userErr);
+          return;
+        }
+        const user = userData?.user;
+        if (!user) return;
+        const { data, error } = await supabase
+          .from('profiles')
+          .select('full_name,major,graduation_year,profile_picture_url')
+          .eq('id', user.id)
+          .single();
+        if (!error && mounted) setProfileUser(data as any);
+      } catch (err) {
+        console.error('Failed loading profileUser', err);
+      }
+    };
+    loadProfile();
+    return () => { mounted = false; };
+  }, []);
 
   // Fetch jobs from Supabase on mount
   useEffect(() => {
@@ -133,47 +165,53 @@ const USFDashboard = () => {
     setJobLoading(false);
   };
 
-  const people = [
-    {
-      id: 1,
-      name: "Sarah Chen",
-      title: "CS Senior @ USF",
-      company: "Interning at Microsoft",
-      avatar: "/api/placeholder/50/50",
-      mutualConnections: 12,
-      tags: ["Software Engineering", "AI/ML"]
-    },
-    {
-      id: 2,
-      name: "Marcus Johnson",
-      title: "Business Major",
-      company: "Marketing Intern at Adobe",
-      avatar: "/api/placeholder/50/50",
-      mutualConnections: 8,
-      tags: ["Digital Marketing", "Analytics"]
-    }
-  ];
+  const [people, setPeople] = useState<Person[]>([]);
+  const [events, setEvents] = useState<Event[]>([]);
 
-  const events = [
-    {
-      id: 1,
-      title: "Tech Career Fair",
-      date: "March 15, 2025",
-      time: "10:00 AM - 4:00 PM",
-      location: "USF Marshall Student Center",
-      attendees: 245,
-      type: "Career Fair"
-    },
-    {
-      id: 2,
-      title: "Networking Night",
-      date: "March 20, 2025",
-      time: "6:00 PM - 8:00 PM",
-      location: "Innovation Hub",
-      attendees: 89,
-      type: "Networking"
-    }
-  ];
+  useEffect(() => {
+    let mounted = true;
+    const loadPeople = async () => {
+      try {
+        const { data, error } = await supabase
+          .from('profiles')
+          .select('id,full_name,major,profile_picture_url')
+          .limit(8);
+        if (!error && mounted) {
+          setPeople((data || []).map((p: any) => ({
+            id: p.id,
+            name: p.full_name || 'Student',
+            title: p.major || '',
+            company: '',
+            avatar: p.profile_picture_url || '/api/placeholder/50/50',
+            mutualConnections: Math.floor(Math.random() * 12),
+            tags: []
+          })));
+        }
+      } catch (err) {
+        console.error('loadPeople error', err);
+      }
+    };
+    loadPeople();
+    return () => { mounted = false; };
+  }, []);
+
+  useEffect(() => {
+    let mounted = true;
+    const loadEvents = async () => {
+      try {
+        const { data, error } = await supabase
+          .from('events')
+          .select('*')
+          .order('event_date', { ascending: true })
+          .limit(6);
+        if (!error && mounted) setEvents(data || []);
+      } catch (err) {
+        console.error('loadEvents error', err);
+      }
+    };
+    loadEvents();
+    return () => { mounted = false; };
+  }, []);
 
   const sidebarItems = [
     { id: 'jobs', label: 'Job Posts', icon: Briefcase },
@@ -358,8 +396,8 @@ const USFDashboard = () => {
                   <User className="w-4 h-4" />
                 </div>
                 <div className="hidden md:block">
-                  <p className="text-sm font-medium">{user.name}</p>
-                  <p className="text-xs text-green-200">{user.major}, {user.year}</p>
+                  <p className="text-sm font-medium">{profileUser?.full_name ?? 'Student'}</p>
+                  <p className="text-xs text-green-200">{profileUser?.major ?? ''}{profileUser?.graduation_year ? `, ${getYearTitle(profileUser.graduation_year)}` : ''}</p>
                 </div>
               </div>
             </div>
@@ -377,13 +415,11 @@ const USFDashboard = () => {
                   <User className="w-6 h-6 text-green-600" />
                 </div>
                 <div>
-                  <h3 className="font-semibold text-gray-900">{user.name}</h3>
-                  <p className="text-gray-600 text-sm">{user.major}</p>
+                  <h3 className="font-semibold text-gray-900">{profileUser?.full_name ?? 'Student'}</h3>
+                  <p className="text-gray-600 text-sm">{profileUser?.major ?? ''}</p>
                 </div>
               </div>
-              <button className="w-full text-left text-green-600 text-sm hover:bg-green-50 p-2 rounded">
-                View Profile
-              </button>
+              <Link href="/profile/view" className="w-full block text-left text-green-600 text-sm hover:bg-green-50 p-2 rounded">View Profile</Link>
             </div>
 
             <nav className="bg-white rounded-xl shadow-sm border border-gray-100">
