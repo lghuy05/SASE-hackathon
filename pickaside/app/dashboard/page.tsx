@@ -1,5 +1,5 @@
 'use client'
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, ChangeEvent, FormEvent } from 'react';
 import { createBrowserClient } from '@supabase/ssr'
 import { useRouter } from 'next/navigation';
 import {
@@ -11,86 +11,218 @@ import {
 const USFDashboard = () => {
   const [activeTab, setActiveTab] = useState('jobs');
   const [showNotifications, setShowNotifications] = useState(false);
-  const [userData, setUserData] = useState(null); // Real user data from Supabase
+  const [userData, setUserData] = useState<{
+    name?: string;
+    email?: string;
+    major?: string;
+    year?: string;
+    avatar?: string;
+  } | null>(null);
   const [loading, setLoading] = useState(true);
   const router = useRouter();
+
+  // Job posting state
+  type JobPost = {
+    id: string;
+    title: string;
+    company: string;
+    location: string;
+    job_type: string;
+    industry: string;
+    description: string;
+    requirements: string;
+    salary_range: string;
+    hours_per_week: string;
+    application_deadline: string | null;
+    posted_by?: string;
+    is_active: boolean;
+    created_at: string;
+  };
+
+  type JobFormState = {
+    title: string;
+    company: string;
+    location: string;
+    job_type: string;
+    industry: string;
+    description: string;
+    requirements: string;
+    salary_range: string;
+    hours_per_week: string;
+    application_deadline: string;
+  };
+
+  const [jobPosts, setJobPosts] = useState<JobPost[]>([]);
+  const [jobForm, setJobForm] = useState<JobFormState>({
+    title: '',
+    company: '',
+    location: '',
+    job_type: '',
+    industry: '',
+    description: '',
+    requirements: '',
+    salary_range: '',
+    hours_per_week: '',
+    application_deadline: '',
+  });
+  const [jobLoading, setJobLoading] = useState(false);
+  const [jobError, setJobError] = useState('');
 
   // Initialize Supabase client
   const supabase = createBrowserClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_OR_ANON_KEY!
-  )
+  );
 
   useEffect(() => {
     const checkAuthAndFetchData = async () => {
       // Check if user is authenticated
-      const { data: { user }, error: authError } = await supabase.auth.getUser()
+      const { data: { user }, error: authError } = await supabase.auth.getUser();
 
       if (authError || !user) {
-        router.push('/auth/login')
-        return
+        router.push('/auth/login');
+        return;
       }
 
-      // Fetch user profile data from your profiles table
+      // Fetch user profile data
       const { data: profile, error: profileError } = await supabase
         .from('profiles')
         .select('*')
         .eq('id', user.id)
-        .single()
+        .single();
 
       if (profileError) {
-        console.error('Error fetching profile:', profileError)
-        // Still set basic user data from auth
+        console.error('Error fetching profile:', profileError);
         setUserData({
           name: user.email?.split('@')[0] || 'User',
           email: user.email,
-          avatar: null
-        })
+          avatar: undefined
+        });
       } else {
-        // Use real profile data
         setUserData({
           name: profile.full_name || user.email?.split('@')[0],
           major: profile.major,
           year: profile.graduation_year ? `Class of ${profile.graduation_year}` : 'Student',
           email: user.email,
           avatar: profile.profile_picture_url
-        })
+        });
       }
 
-      setLoading(false)
-    }
+      // Fetch jobs from Supabase
+      const { data: jobs, error: jobsError } = await supabase
+        .from('job_posts')
+        .select('*')
+        .order('created_at', { ascending: false });
 
-    checkAuthAndFetchData()
-  }, [router, supabase])
+      if (jobsError) {
+        console.error('Error fetching jobs:', jobsError);
+      } else {
+        setJobPosts(jobs || []);
+      }
+
+      setLoading(false);
+    };
+
+    checkAuthAndFetchData();
+  }, [router, supabase]);
 
   const handleSignOut = async () => {
-    await supabase.auth.signOut()
-    router.push('/')
-  }
+    await supabase.auth.signOut();
+    router.push('/');
+  };
 
-  // Mock data (you can replace this with real data from Supabase later)
-  const jobPosts = [
-    {
-      id: 1,
-      title: "Software Engineering Intern",
-      company: "Tech Innovations Inc",
-      location: "Tampa, FL",
-      type: "Internship",
-      salary: "$25/hr",
-      posted: "2 hours ago",
-      logo: "/api/placeholder/60/60",
-      tags: ["React", "Node.js", "Remote"],
-      description: "Join our dynamic team for a summer internship focused on full-stack development..."
-    },
-    // ... other job posts
-  ];
+  // Handle job form input
+  const handleJobInput = (e: ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
+    const { name, value } = e.target;
+    setJobForm((prev) => ({ ...prev, [name]: value }));
+  };
+
+  // Handle job form submit
+  const handleJobSubmit = async (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    setJobLoading(true);
+    setJobError('');
+
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        throw new Error('No user found');
+      }
+
+      const { data, error } = await supabase.from('job_posts').insert([
+        {
+          title: jobForm.title,
+          company: jobForm.company,
+          location: jobForm.location,
+          job_type: jobForm.job_type,
+          industry: jobForm.industry,
+          description: jobForm.description,
+          requirements: jobForm.requirements,
+          salary_range: jobForm.salary_range,
+          hours_per_week: jobForm.hours_per_week,
+          application_deadline: jobForm.application_deadline || null,
+          posted_by: user.id,
+        }
+      ]).select();
+
+      if (error) {
+        setJobError('Failed to post job: ' + (error.message || 'Unknown error'));
+        console.error('Supabase insert error:', error);
+      } else if (data && data.length > 0) {
+        setJobPosts((prev) => [data[0] as JobPost, ...prev]);
+        setJobForm({
+          title: '', company: '', location: '', job_type: '', industry: '',
+          description: '', requirements: '', salary_range: '', hours_per_week: '',
+          application_deadline: ''
+        });
+      }
+    } catch (err: any) {
+      setJobError('Unexpected error: ' + (err.message || 'Unknown error'));
+      console.error('Unexpected error:', err);
+    }
+    setJobLoading(false);
+  };
 
   const people = [
-    // ... your people data
+    {
+      id: 1,
+      name: "Sarah Chen",
+      title: "CS Senior @ USF",
+      company: "Interning at Microsoft",
+      avatar: "/api/placeholder/50/50",
+      mutualConnections: 12,
+      tags: ["Software Engineering", "AI/ML"]
+    },
+    {
+      id: 2,
+      name: "Marcus Johnson",
+      title: "Business Major",
+      company: "Marketing Intern at Adobe",
+      avatar: "/api/placeholder/50/50",
+      mutualConnections: 8,
+      tags: ["Digital Marketing", "Analytics"]
+    }
   ];
 
   const events = [
-    // ... your events data
+    {
+      id: 1,
+      title: "Tech Career Fair",
+      date: "March 15, 2025",
+      time: "10:00 AM - 4:00 PM",
+      location: "USF Marshall Student Center",
+      attendees: 245,
+      type: "Career Fair"
+    },
+    {
+      id: 2,
+      title: "Networking Night",
+      date: "March 20, 2025",
+      time: "6:00 PM - 8:00 PM",
+      location: "Innovation Hub",
+      attendees: 89,
+      type: "Networking"
+    }
   ];
 
   const sidebarItems = [
@@ -100,14 +232,153 @@ const USFDashboard = () => {
     { id: 'events', label: 'Events', icon: Calendar }
   ];
 
-  // ... your JobCard, PersonCard, EventCard components remain the same
+  const JobCard = ({ job }: { job: JobPost }) => (
+    <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100 hover:shadow-md transition-shadow">
+      <div className="flex items-start justify-between mb-4">
+        <div className="flex items-center space-x-4">
+          <div className="w-14 h-14 bg-green-100 rounded-lg flex items-center justify-center">
+            <Building className="w-6 h-6 text-green-600" />
+          </div>
+          <div>
+            <h3 className="font-semibold text-gray-900 text-lg">{job.title}</h3>
+            <p className="text-green-600 font-medium">{job.company}</p>
+            <div className="flex items-center space-x-4 text-sm text-gray-500 mt-1">
+              <div className="flex items-center">
+                <MapPin className="w-4 h-4 mr-1" />
+                {job.location}
+              </div>
+              <div className="flex items-center">
+                <Clock className="w-4 h-4 mr-1" />
+                {job.created_at ? new Date(job.created_at).toLocaleDateString() : ''}
+              </div>
+            </div>
+          </div>
+        </div>
+        <div className="text-right">
+          <span className="bg-yellow-100 text-yellow-800 px-3 py-1 rounded-full text-sm font-medium">
+            {job.job_type}
+          </span>
+          <p className="text-green-600 font-semibold mt-2">{job.salary_range}</p>
+        </div>
+      </div>
+
+      <p className="text-gray-600 mb-2 line-clamp-2">{job.description}</p>
+      <p className="text-gray-500 text-sm mb-2">Industry: {job.industry}</p>
+      <p className="text-gray-500 text-sm mb-2">Requirements: {job.requirements}</p>
+      <p className="text-gray-500 text-sm mb-2">Hours per week: <span className="font-semibold">{job.hours_per_week}</span></p>
+      {job.application_deadline && (
+        <p className="text-gray-500 text-sm mb-2">Apply by: {new Date(job.application_deadline).toLocaleDateString()}</p>
+      )}
+
+      <div className="flex items-center justify-between mt-2">
+        <div />
+        <div className="flex space-x-2">
+          <button className="p-2 text-gray-400 hover:text-red-500 transition-colors">
+            <Heart className="w-4 h-4" />
+          </button>
+          <button className="p-2 text-gray-400 hover:text-gray-600 transition-colors">
+            <Bookmark className="w-4 h-4" />
+          </button>
+          <button className="bg-green-600 text-white px-4 py-2 rounded-lg text-sm hover:bg-green-700 transition-colors">
+            Apply Now
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+
+  type Person = {
+    id: number;
+    name: string;
+    title: string;
+    company: string;
+    avatar: string;
+    mutualConnections: number;
+    tags: string[];
+  };
+
+  const PersonCard = ({ person }: { person: Person }) => (
+    <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100 hover:shadow-md transition-shadow">
+      <div className="flex items-center space-x-4 mb-4">
+        <div className="w-12 h-12 bg-blue-100 rounded-full flex items-center justify-center">
+          <User className="w-6 h-6 text-blue-600" />
+        </div>
+        <div className="flex-1">
+          <h3 className="font-semibold text-gray-900">{person.name}</h3>
+          <p className="text-gray-600 text-sm">{person.title}</p>
+          <p className="text-blue-600 text-sm">{person.company}</p>
+        </div>
+      </div>
+
+      <p className="text-gray-500 text-sm mb-3">
+        {person.mutualConnections} mutual connections
+      </p>
+
+      <div className="flex flex-wrap gap-2 mb-4">
+        {person.tags.map((tag) => (
+          <span key={tag} className="bg-blue-50 text-blue-700 px-2 py-1 rounded text-xs">
+            {tag}
+          </span>
+        ))}
+      </div>
+
+      <button className="w-full bg-green-600 text-white py-2 rounded-lg text-sm hover:bg-green-700 transition-colors">
+        Connect
+      </button>
+    </div>
+  );
+
+  type Event = {
+    id: number;
+    title: string;
+    date: string;
+    time: string;
+    location: string;
+    attendees: number;
+    type: string;
+  };
+
+  const EventCard = ({ event }: { event: Event }) => (
+    <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100 hover:shadow-md transition-shadow">
+      <div className="flex justify-between items-start mb-3">
+        <div>
+          <h3 className="font-semibold text-gray-900">{event.title}</h3>
+          <span className="bg-purple-100 text-purple-800 px-2 py-1 rounded text-xs">
+            {event.type}
+          </span>
+        </div>
+      </div>
+
+      <div className="space-y-2 text-sm text-gray-600 mb-4">
+        <div className="flex items-center">
+          <Calendar className="w-4 h-4 mr-2" />
+          {event.date}
+        </div>
+        <div className="flex items-center">
+          <Clock className="w-4 h-4 mr-2" />
+          {event.time}
+        </div>
+        <div className="flex items-center">
+          <MapPin className="w-4 h-4 mr-2" />
+          {event.location}
+        </div>
+      </div>
+
+      <div className="flex justify-between items-center">
+        <p className="text-gray-500 text-sm">{event.attendees} attending</p>
+        <button className="bg-green-600 text-white px-4 py-2 rounded-lg text-sm hover:bg-green-700 transition-colors">
+          Register
+        </button>
+      </div>
+    </div>
+  );
 
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50">
         <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-green-600"></div>
       </div>
-    )
+    );
   }
 
   return (
@@ -117,7 +388,7 @@ const USFDashboard = () => {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between items-center h-16">
             <div className="flex items-center">
-              <h1 className="text-xl font-bold">USF Connect</h1>
+              <h1 className="text-xl font-bold">Pick A Side</h1>
             </div>
 
             {/* Search Bar */}
@@ -150,7 +421,6 @@ const USFDashboard = () => {
                   <p className="text-sm font-medium">{userData?.name}</p>
                   <p className="text-xs text-green-200">{userData?.major || 'USF Student'}, {userData?.year || ''}</p>
                 </div>
-                {/* Sign Out Button */}
                 <button
                   onClick={handleSignOut}
                   className="p-2 hover:bg-green-700 rounded-lg transition-colors"
@@ -206,7 +476,7 @@ const USFDashboard = () => {
             </nav>
           </div>
 
-          {/* Main Content - YOUR EXISTING CONTENT HERE */}
+          {/* Main Content */}
           <div className="lg:col-span-3">
             {/* Content Header */}
             <div className="flex justify-between items-center mb-6">
@@ -229,9 +499,78 @@ const USFDashboard = () => {
               </button>
             </div>
 
-            {/* Content Area - YOUR EXISTING CONTENT HERE */}
+            {/* Content Area */}
             <div className="space-y-6">
-              {/* ... your existing job cards, people cards, etc. */}
+              {activeTab === 'jobs' && (
+                <>
+                  {/* Job Posting Form */}
+                  <form onSubmit={handleJobSubmit} className="bg-white rounded-xl p-6 shadow-sm border border-gray-100 mb-6 space-y-4">
+                    <h3 className="text-lg font-semibold text-gray-900 mb-2">Post a Job</h3>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <input name="title" value={jobForm.title} onChange={handleJobInput} required placeholder="Job Title" className="border p-2 rounded" />
+                      <input name="company" value={jobForm.company} onChange={handleJobInput} required placeholder="Company" className="border p-2 rounded" />
+                      <input name="location" value={jobForm.location} onChange={handleJobInput} required placeholder="Location" className="border p-2 rounded" />
+                      <select name="job_type" value={jobForm.job_type} onChange={handleJobInput} required className="border p-2 rounded">
+                        <option value="">Select Job Type</option>
+                        <option value="internship">Internship</option>
+                        <option value="full-time">Full-time</option>
+                        <option value="part-time">Part-time</option>
+                        <option value="co-op">Co-op</option>
+                      </select>
+                      <input name="industry" value={jobForm.industry} onChange={handleJobInput} required placeholder="Industry" className="border p-2 rounded" />
+                      <input name="salary_range" value={jobForm.salary_range} onChange={handleJobInput} placeholder="Salary Range" className="border p-2 rounded" />
+                      <input name="hours_per_week" value={jobForm.hours_per_week} onChange={handleJobInput} required placeholder="Hours per Week" className="border p-2 rounded" />
+                      <div className="md:col-span-2">
+                        <label htmlFor="application_deadline" className="font-bold block mb-1">Application Deadline</label>
+                        <p className="text-xs text-gray-500 mb-1">Select the last date candidates can apply for this job.</p>
+                        <input id="application_deadline" name="application_deadline" value={jobForm.application_deadline} onChange={handleJobInput} type="date" placeholder="Application Deadline" className="border p-2 rounded w-full md:w-auto" />
+                      </div>
+                    </div>
+                    <div>
+                      <label htmlFor="description" className="font-bold block mb-1">Job Description</label>
+                      <p className="text-xs text-gray-500 mb-1">Provide a detailed overview of the role and responsibilities.</p>
+                      <textarea id="description" name="description" value={jobForm.description} onChange={handleJobInput} required placeholder="Job Description" className="border p-2 rounded w-full" rows={3} />
+                    </div>
+                    <div>
+                      <label htmlFor="requirements" className="font-bold block mb-1">Requirements</label>
+                      <p className="text-xs text-gray-500 mb-1">List the qualifications, skills, or experience needed.</p>
+                      <textarea id="requirements" name="requirements" value={jobForm.requirements} onChange={handleJobInput} required placeholder="Requirements" className="border p-2 rounded w-full" rows={2} />
+                    </div>
+                    {jobError && <p className="text-red-500 text-sm">{jobError}</p>}
+                    <button type="submit" className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition-colors" disabled={jobLoading}>
+                      {jobLoading ? 'Posting...' : 'Post Job'}
+                    </button>
+                  </form>
+                  {/* Job List */}
+                  {jobPosts.length > 0 ? jobPosts.map(job => (
+                    <JobCard key={job.id} job={job} />
+                  )) : <p>No job posts found.</p>}
+                </>
+              )}
+
+              {activeTab === 'people' && (
+                <div className="grid md:grid-cols-2 gap-6">
+                  {people.map(person => (
+                    <PersonCard key={person.id} person={person} />
+                  ))}
+                </div>
+              )}
+
+              {activeTab === 'events' && (
+                <div className="grid md:grid-cols-2 gap-6">
+                  {events.map(event => (
+                    <EventCard key={event.id} event={event} />
+                  ))}
+                </div>
+              )}
+
+              {activeTab === 'messages' && (
+                <div className="bg-white rounded-xl p-8 shadow-sm border border-gray-100 text-center">
+                  <MessageCircle className="w-12 h-12 text-gray-400 mx-auto mb-4" />
+                  <h3 className="text-lg font-semibold text-gray-900 mb-2">No messages yet</h3>
+                  <p className="text-gray-600">Start connecting with people to begin conversations!</p>
+                </div>
+              )}
             </div>
           </div>
         </div>
