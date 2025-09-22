@@ -107,9 +107,7 @@ export default async function ProfileViewPage() {
                 <div className="flex items-center gap-3">
                   <Link href="/profile/edit" className="px-4 py-2 bg-green-600 text-white rounded-lg text-sm hover:bg-green-700">Edit Profile</Link>
                   <Link href="/dashboard" className="px-4 py-2 border border-gray-300 rounded-lg text-sm">Return to Dashboard</Link>
-                  {profile?.id && (
-                    <Link href={`/messages/${profile.id}`} className="px-4 py-2 border border-blue-600 text-blue-600 rounded-lg text-sm hover:bg-blue-50">Message</Link>
-                  )}
+                  {/* Message button removed from profile view; messaging is started from Applications / dashboard */}
                 </div>
               </div>
 
