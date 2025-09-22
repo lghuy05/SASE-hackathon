@@ -2,6 +2,7 @@
 import React, { useState, useEffect, useRef, ChangeEvent, FormEvent } from 'react';
 import { createBrowserClient } from '@supabase/ssr'
 import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 import {
   Home, Briefcase, Users, MessageCircle, Calendar, Bell, Search,
   MapPin, Clock, DollarSign, Building, User, Settings, LogOut,
@@ -18,6 +19,7 @@ const USFDashboard = () => {
     major?: string;
     year?: string;
     avatar?: string;
+    graduation_year?: number;
   } | null>(null);
   const [loading, setLoading] = useState(true);
   const [notifications, setNotifications] = useState<any[]>([]);
@@ -34,6 +36,7 @@ const USFDashboard = () => {
     description: string;
     requirements: string;
     salary_range: string;
+    hours_per_week: string;
     application_deadline: string | null;
     posted_by?: string;
     is_active: boolean;
@@ -49,6 +52,7 @@ const USFDashboard = () => {
     description: string;
     requirements: string;
     salary_range: string;
+    hours_per_week: string;
     application_deadline: string;
   };
 
@@ -66,6 +70,7 @@ const USFDashboard = () => {
 
   const [jobPosts, setJobPosts] = useState<JobPost[]>([]);
   const [people, setPeople] = useState<Person[]>([]);
+  const [events, setEvents] = useState<any[]>([]);
   const [jobForm, setJobForm] = useState<JobFormState>({
     title: '',
     company: '',
@@ -75,6 +80,7 @@ const USFDashboard = () => {
     description: '',
     requirements: '',
     salary_range: '',
+    hours_per_week: '',
     application_deadline: '',
   });
   const [jobLoading, setJobLoading] = useState(false);
@@ -85,6 +91,16 @@ const USFDashboard = () => {
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_OR_ANON_KEY!
   );
+
+  const getYearTitle = (gradYear?: number | null) => {
+    if (!gradYear) return 'Student';
+    const currentYear = new Date().getFullYear();
+    const yearsLeft = gradYear - currentYear;
+    if (yearsLeft <= 1) return 'Senior';
+    if (yearsLeft <= 2) return 'Junior';
+    if (yearsLeft <= 3) return 'Sophomore';
+    return 'Freshman';
+  };
 
   useEffect(() => {
     const checkAuthAndFetchData = async () => {
@@ -117,6 +133,7 @@ const USFDashboard = () => {
           name: profile.full_name || user.email?.split('@')[0],
           major: profile.major,
           year: profile.graduation_year ? `Class of ${profile.graduation_year}` : 'Student',
+          graduation_year: profile.graduation_year,
           email: user.email,
           avatar: profile.profile_picture_url
         });
@@ -136,6 +153,17 @@ const USFDashboard = () => {
 
       // Fetch people (other users) with their interests and connection status
       await fetchPeople(user.id);
+
+      // Fetch events
+      const { data: eventsData, error: eventsError } = await supabase
+        .from('events')
+        .select('*')
+        .order('event_date', { ascending: true })
+        .limit(6);
+
+      if (!eventsError) {
+        setEvents(eventsData || []);
+      }
 
       // Fetch notifications
       await fetchNotifications(user.id);
@@ -178,7 +206,7 @@ const USFDashboard = () => {
         const userInterests = interests?.filter(i => i.user_id === profile.id).map(i => i.value) || [];
 
         // Check connection status
-        let connectionStatus = 'none';
+        let connectionStatus: 'none' | 'pending' | 'connected' | 'declined' = 'none';
         const connection = connections?.find(c =>
           (c.requester_id === currentUserId && c.receiver_id === profile.id) ||
           (c.receiver_id === currentUserId && c.requester_id === profile.id)
@@ -265,37 +293,6 @@ const USFDashboard = () => {
     }
   };
 
-  const respondToConnection = async (connectionId: string, response: 'accepted' | 'declined') => {
-    const { error } = await supabase
-      .from('connections')
-      .update({
-        status: response,
-        responded_at: new Date().toISOString()
-      })
-      .eq('id', connectionId);
-
-    if (!error && response === 'accepted') {
-      // Create notification for requester
-      const notification = notifications.find(n => n.related_id === connectionId);
-      if (notification) {
-        await supabase
-          .from('notifications')
-          .insert({
-            user_id: notification.related_id,
-            type: 'connection_accepted',
-            title: 'Connection Accepted',
-            message: `${userData?.name} accepted your connection request`
-          });
-      }
-    }
-
-    // Refresh notifications and people
-    if (userData?.id) {
-      await fetchNotifications(userData.id);
-      await fetchPeople(userData.id);
-    }
-  };
-
   const handleSignOut = async () => {
     await supabase.auth.signOut();
     router.push('/');
@@ -329,6 +326,7 @@ const USFDashboard = () => {
           description: jobForm.description,
           requirements: jobForm.requirements,
           salary_range: jobForm.salary_range,
+          hours_per_week: jobForm.hours_per_week,
           application_deadline: jobForm.application_deadline || null,
           posted_by: user.id,
         }
@@ -341,7 +339,8 @@ const USFDashboard = () => {
         setJobPosts((prev) => [data[0] as JobPost, ...prev]);
         setJobForm({
           title: '', company: '', location: '', job_type: '', industry: '',
-          description: '', requirements: '', salary_range: '', application_deadline: ''
+          description: '', requirements: '', salary_range: '', hours_per_week: '',
+          application_deadline: ''
         });
       }
     } catch (err: any) {
@@ -350,27 +349,6 @@ const USFDashboard = () => {
     }
     setJobLoading(false);
   };
-
-  const events = [
-    {
-      id: 1,
-      title: "Tech Career Fair",
-      date: "March 15, 2025",
-      time: "10:00 AM - 4:00 PM",
-      location: "USF Marshall Student Center",
-      attendees: 245,
-      type: "Career Fair"
-    },
-    {
-      id: 2,
-      title: "Networking Night",
-      date: "March 20, 2025",
-      time: "6:00 PM - 8:00 PM",
-      location: "Innovation Hub",
-      attendees: 89,
-      type: "Networking"
-    }
-  ];
 
   const sidebarItems = [
     { id: 'jobs', label: 'Job Posts', icon: Briefcase },
@@ -412,6 +390,7 @@ const USFDashboard = () => {
       <p className="text-gray-600 mb-2 line-clamp-2">{job.description}</p>
       <p className="text-gray-500 text-sm mb-2">Industry: {job.industry}</p>
       <p className="text-gray-500 text-sm mb-2">Requirements: {job.requirements}</p>
+      <p className="text-gray-500 text-sm mb-2">Hours per week: <span className="font-semibold">{job.hours_per_week}</span></p>
       {job.application_deadline && (
         <p className="text-gray-500 text-sm mb-2">Apply by: {new Date(job.application_deadline).toLocaleDateString()}</p>
       )}
@@ -497,23 +476,13 @@ const USFDashboard = () => {
     </div>
   );
 
-  type Event = {
-    id: number;
-    title: string;
-    date: string;
-    time: string;
-    location: string;
-    attendees: number;
-    type: string;
-  };
-
-  const EventCard = ({ event }: { event: Event }) => (
+  const EventCard = ({ event }: { event: any }) => (
     <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100 hover:shadow-md transition-shadow">
       <div className="flex justify-between items-start mb-3">
         <div>
           <h3 className="font-semibold text-gray-900">{event.title}</h3>
           <span className="bg-purple-100 text-purple-800 px-2 py-1 rounded text-xs">
-            {event.type}
+            {event.event_type}
           </span>
         </div>
       </div>
@@ -521,20 +490,18 @@ const USFDashboard = () => {
       <div className="space-y-2 text-sm text-gray-600 mb-4">
         <div className="flex items-center">
           <Calendar className="w-4 h-4 mr-2" />
-          {event.date}
+          {event.event_date ? new Date(event.event_date).toLocaleDateString() : 'TBD'}
         </div>
-        <div className="flex items-center">
-          <Clock className="w-4 h-4 mr-2" />
-          {event.time}
-        </div>
-        <div className="flex items-center">
-          <MapPin className="w-4 h-4 mr-2" />
-          {event.location}
-        </div>
+        {event.location && (
+          <div className="flex items-center">
+            <MapPin className="w-4 h-4 mr-2" />
+            {event.location}
+          </div>
+        )}
       </div>
 
       <div className="flex justify-between items-center">
-        <p className="text-gray-500 text-sm">{event.attendees} attending</p>
+        <p className="text-gray-500 text-sm">{event.max_attendees ? `${event.max_attendees} spots available` : 'Open event'}</p>
         <button className="bg-green-600 text-white px-4 py-2 rounded-lg text-sm hover:bg-green-700 transition-colors">
           Register
         </button>
@@ -557,24 +524,6 @@ const USFDashboard = () => {
             <div key={notification.id} className={`p-4 border-b border-gray-100 ${!notification.is_read ? 'bg-blue-50' : ''}`}>
               <div className="flex justify-between items-start mb-2">
                 <h4 className="font-medium text-gray-900 text-sm">{notification.title}</h4>
-                <div className="flex space-x-1">
-                  {notification.type === 'connection_request' && (
-                    <>
-                      <button
-                        onClick={() => respondToConnection(notification.related_id, 'accepted')}
-                        className="p-1 text-green-600 hover:bg-green-100 rounded"
-                      >
-                        <Check className="w-4 h-4" />
-                      </button>
-                      <button
-                        onClick={() => respondToConnection(notification.related_id, 'declined')}
-                        className="p-1 text-red-600 hover:bg-red-100 rounded"
-                      >
-                        <X className="w-4 h-4" />
-                      </button>
-                    </>
-                  )}
-                </div>
               </div>
               <p className="text-gray-600 text-sm">{notification.message}</p>
               <p className="text-gray-400 text-xs mt-1">
@@ -638,7 +587,7 @@ const USFDashboard = () => {
                 </div>
                 <div className="hidden md:block">
                   <p className="text-sm font-medium">{userData?.name}</p>
-                  <p className="text-xs text-green-200">{userData?.major || 'USF Student'}, {userData?.year || ''}</p>
+                  <p className="text-xs text-green-200">{userData?.major || 'USF Student'}, {getYearTitle(userData?.graduation_year)}</p>
                 </div>
                 <button
                   onClick={handleSignOut}
@@ -668,12 +617,9 @@ const USFDashboard = () => {
                   <p className="text-gray-500 text-xs">{userData?.year}</p>
                 </div>
               </div>
-              <button
-                onClick={() => router.push('/profile')}
-                className="w-full text-left text-green-600 text-sm hover:bg-green-50 p-2 rounded"
-              >
+              <Link href="/profile/view" className="w-full block text-left text-green-600 text-sm hover:bg-green-50 p-2 rounded">
                 View Profile
-              </button>
+              </Link>
             </div>
 
             <nav className="bg-white rounded-xl shadow-sm border border-gray-100">
@@ -738,6 +684,7 @@ const USFDashboard = () => {
                       </select>
                       <input name="industry" value={jobForm.industry} onChange={handleJobInput} required placeholder="Industry" className="border p-2 rounded" />
                       <input name="salary_range" value={jobForm.salary_range} onChange={handleJobInput} placeholder="Salary Range" className="border p-2 rounded" />
+                      <input name="hours_per_week" value={jobForm.hours_per_week} onChange={handleJobInput} required placeholder="Hours per Week" className="border p-2 rounded" />
                       <div className="md:col-span-2">
                         <label htmlFor="application_deadline" className="font-bold block mb-1">Application Deadline</label>
                         <p className="text-xs text-gray-500 mb-1">Select the last date candidates can apply for this job.</p>
