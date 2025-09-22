@@ -275,7 +275,7 @@ const USFDashboard = () => {
       const jobsWithApplicationData = jobs?.map(job => {
         const jobApplications = applications?.filter(app => app.job_id === job.id) || [];
         const userApplied = jobApplications.some(app => app.applicant_id === userId);
-        
+
         return {
           ...job,
           application_count: jobApplications.length,
@@ -379,8 +379,8 @@ const USFDashboard = () => {
       // Get other participants' info and last messages
       const conversationsWithDetails = await Promise.all(
         conversationsData.map(async (conversation) => {
-          const otherUserId = conversation.participant_1 === userId 
-            ? conversation.participant_2 
+          const otherUserId = conversation.participant_1 === userId
+            ? conversation.participant_2
             : conversation.participant_1;
 
           // Get other user's profile
@@ -428,7 +428,7 @@ const USFDashboard = () => {
       }
 
       setMessages(data || []);
-      
+
       // Mark messages as read
       await supabase
         .from('messages')
@@ -586,10 +586,10 @@ const USFDashboard = () => {
 
       // Refresh job posts to update application status
       await fetchJobsWithApplicationStatus(userData.id);
-      
+
       setShowApplicationModal(false);
       setApplicationForm({ cover_letter: '' });
-      
+
     } catch (error) {
       console.error('Error in submitJobApplication:', error);
     } finally {
@@ -805,11 +805,10 @@ const USFDashboard = () => {
             <button
               onClick={() => handleJobApplication(job)}
               disabled={job.user_applied}
-              className={`px-4 py-2 rounded-lg text-sm transition-colors ${
-                job.user_applied
-                  ? 'bg-gray-300 text-gray-600 cursor-not-allowed'
-                  : 'bg-green-600 text-white hover:bg-green-700'
-              }`}
+              className={`px-4 py-2 rounded-lg text-sm transition-colors ${job.user_applied
+                ? 'bg-gray-300 text-gray-600 cursor-not-allowed'
+                : 'bg-green-600 text-white hover:bg-green-700'
+                }`}
             >
               {job.user_applied ? 'Applied' : 'Apply Now'}
             </button>
@@ -929,7 +928,7 @@ const USFDashboard = () => {
             <X className="w-5 h-5" />
           </button>
         </div>
-        
+
         <form onSubmit={submitJobApplication} className="space-y-4">
           <div>
             <label htmlFor="cover_letter" className="block text-sm font-medium text-gray-700 mb-2">
@@ -945,7 +944,7 @@ const USFDashboard = () => {
               required
             />
           </div>
-          
+
           <div className="flex space-x-3">
             <button
               type="button"
@@ -982,7 +981,7 @@ const USFDashboard = () => {
             <X className="w-5 h-5" />
           </button>
         </div>
-        
+
         {applicationsLoading ? (
           <div className="flex justify-center py-8">
             <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-green-600"></div>
@@ -1008,7 +1007,7 @@ const USFDashboard = () => {
                       <User className="w-8 h-8 text-blue-600" />
                     )}
                   </div>
-                  
+
                   <div className="flex-1">
                     <div className="flex justify-between items-start mb-2">
                       <div>
@@ -1022,17 +1021,16 @@ const USFDashboard = () => {
                           <p className="text-gray-500 text-sm">GPA: {application.applicant.gpa}</p>
                         )}
                       </div>
-                      
+
                       <div className="flex items-center space-x-2">
-                        <span className={`px-3 py-1 rounded-full text-xs font-medium ${
-                          application.status === 'pending' ? 'bg-yellow-100 text-yellow-800' :
+                        <span className={`px-3 py-1 rounded-full text-xs font-medium ${application.status === 'pending' ? 'bg-yellow-100 text-yellow-800' :
                           application.status === 'reviewed' ? 'bg-blue-100 text-blue-800' :
-                          application.status === 'accepted' ? 'bg-green-100 text-green-800' :
-                          'bg-red-100 text-red-800'
-                        }`}>
+                            application.status === 'accepted' ? 'bg-green-100 text-green-800' :
+                              'bg-red-100 text-red-800'
+                          }`}>
                           {application.status}
                         </span>
-                        
+
                         <div className="relative">
                           <select
                             value={application.status}
@@ -1048,7 +1046,7 @@ const USFDashboard = () => {
                         </div>
                       </div>
                     </div>
-                    
+
                     <div className="grid grid-cols-2 gap-4 mb-4">
                       <div>
                         <p className="text-sm text-gray-500">Contact</p>
@@ -1063,7 +1061,7 @@ const USFDashboard = () => {
                           </div>
                         )}
                       </div>
-                      
+
                       <div>
                         <p className="text-sm text-gray-500">Links</p>
                         <div className="space-y-1">
@@ -1114,21 +1112,21 @@ const USFDashboard = () => {
                         </div>
                       </div>
                     </div>
-                    
+
                     {application.applicant.bio && (
                       <div className="mb-4">
                         <p className="text-sm text-gray-500 mb-1">Bio</p>
                         <p className="text-sm text-gray-700">{application.applicant.bio}</p>
                       </div>
                     )}
-                    
+
                     <div>
                       <p className="text-sm text-gray-500 mb-1">Cover Letter</p>
                       <div className="bg-gray-50 rounded-lg p-3">
                         <p className="text-sm text-gray-700">{application.cover_letter}</p>
                       </div>
                     </div>
-                    
+
                     <p className="text-xs text-gray-400 mt-2">
                       Applied on {new Date(application.applied_at).toLocaleDateString()}
                     </p>
@@ -1155,11 +1153,10 @@ const USFDashboard = () => {
           <div
             key={conversation.id}
             onClick={() => setSelectedConversation(conversation.id)}
-            className={`p-4 rounded-lg border cursor-pointer transition-colors ${
-              selectedConversation === conversation.id
-                ? 'bg-green-50 border-green-200'
-                : 'bg-white border-gray-100 hover:bg-gray-50'
-            }`}
+            className={`p-4 rounded-lg border cursor-pointer transition-colors ${selectedConversation === conversation.id
+              ? 'bg-green-50 border-green-200'
+              : 'bg-white border-gray-100 hover:bg-gray-50'
+              }`}
           >
             <div className="flex items-center space-x-3">
               <div className="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center">
@@ -1254,19 +1251,17 @@ const USFDashboard = () => {
                 className={`flex ${message.sender_id === userData?.id ? 'justify-end' : 'justify-start'}`}
               >
                 <div
-                  className={`max-w-xs px-4 py-2 rounded-lg ${
-                    message.sender_id === userData?.id
-                      ? 'bg-green-600 text-white'
-                      : 'bg-gray-100 text-gray-900'
-                  }`}
+                  className={`max-w-xs px-4 py-2 rounded-lg ${message.sender_id === userData?.id
+                    ? 'bg-green-600 text-white'
+                    : 'bg-gray-100 text-gray-900'
+                    }`}
                 >
                   <p className="text-sm">{message.content}</p>
-                  <p className={`text-xs mt-1 ${
-                    message.sender_id === userData?.id ? 'text-green-200' : 'text-gray-500'
-                  }`}>
-                    {new Date(message.sent_at).toLocaleTimeString([], { 
-                      hour: '2-digit', 
-                      minute: '2-digit' 
+                  <p className={`text-xs mt-1 ${message.sender_id === userData?.id ? 'text-green-200' : 'text-gray-500'
+                    }`}>
+                    {new Date(message.sent_at).toLocaleTimeString([], {
+                      hour: '2-digit',
+                      minute: '2-digit'
                     })}
                   </p>
                 </div>
