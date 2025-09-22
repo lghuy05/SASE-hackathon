@@ -6,7 +6,8 @@ import Link from 'next/link';
 import {
   Home, Briefcase, Users, MessageCircle, Calendar, Bell, Search,
   MapPin, Clock, DollarSign, Building, User, Settings, LogOut,
-  Heart, Share, Bookmark, ChevronRight, Filter, UserPlus, Check, X
+  Heart, Share, Bookmark, ChevronRight, Filter, UserPlus, Check, X,
+  Send, ArrowLeft, FileText, ExternalLink, Mail, Phone, Eye, ChevronDown
 } from 'lucide-react';
 
 const USFDashboard = () => {
@@ -41,6 +42,8 @@ const USFDashboard = () => {
     posted_by?: string;
     is_active: boolean;
     created_at: string;
+    application_count?: number;
+    user_applied?: boolean;
   };
 
   type JobFormState = {
@@ -68,6 +71,62 @@ const USFDashboard = () => {
     connectionStatus?: 'none' | 'pending' | 'connected' | 'declined';
   };
 
+  type JobApplication = {
+    id: string;
+    job_id: string;
+    applicant_id: string;
+    status: string;
+    cover_letter: string;
+    applied_at: string;
+    applicant: {
+      full_name: string;
+      email: string;
+      major: string;
+      graduation_year: number;
+      gpa: number;
+      phone: string;
+      profile_picture_url: string;
+      linkedin_url: string;
+      github_url: string;
+      portfolio_url: string;
+      resume_url: string;
+      bio: string;
+    };
+    job: {
+      title: string;
+      company: string;
+    };
+  };
+
+  type Conversation = {
+    id: string;
+    participant_1: string;
+    participant_2: string;
+    created_at: string;
+    updated_at: string;
+    other_user?: {
+      id: string;
+      full_name: string;
+      profile_picture_url?: string;
+      major?: string;
+      graduation_year?: number;
+    };
+    last_message?: {
+      content: string;
+      sent_at: string;
+      sender_id: string;
+    };
+  };
+
+  type Message = {
+    id: string;
+    conversation_id: string;
+    sender_id: string;
+    content: string;
+    is_read: boolean;
+    sent_at: string;
+  };
+
   const [jobPosts, setJobPosts] = useState<JobPost[]>([]);
   const [people, setPeople] = useState<Person[]>([]);
   const [events, setEvents] = useState<any[]>([]);
@@ -85,6 +144,24 @@ const USFDashboard = () => {
   });
   const [jobLoading, setJobLoading] = useState(false);
   const [jobError, setJobError] = useState('');
+
+  // Application states
+  const [showApplicationModal, setShowApplicationModal] = useState(false);
+  const [selectedJobForApplication, setSelectedJobForApplication] = useState<JobPost | null>(null);
+  const [applicationForm, setApplicationForm] = useState({ cover_letter: '' });
+  const [applicationLoading, setApplicationLoading] = useState(false);
+  const [showApplicationsModal, setShowApplicationsModal] = useState(false);
+  const [selectedJobForApplications, setSelectedJobForApplications] = useState<JobPost | null>(null);
+  const [jobApplications, setJobApplications] = useState<JobApplication[]>([]);
+  const [applicationsLoading, setApplicationsLoading] = useState(false);
+
+  // Messaging state
+  const [conversations, setConversations] = useState<Conversation[]>([]);
+  const [selectedConversation, setSelectedConversation] = useState<string | null>(null);
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [newMessage, setNewMessage] = useState('');
+  const [messagesLoading, setMessagesLoading] = useState(false);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
 
   // Initialize Supabase client
   const supabase = createBrowserClient(
@@ -139,17 +216,8 @@ const USFDashboard = () => {
         });
       }
 
-      // Fetch jobs from Supabase
-      const { data: jobs, error: jobsError } = await supabase
-        .from('job_posts')
-        .select('*')
-        .order('created_at', { ascending: false });
-
-      if (jobsError) {
-        console.error('Error fetching jobs:', jobsError);
-      } else {
-        setJobPosts(jobs || []);
-      }
+      // Fetch jobs with application status
+      await fetchJobsWithApplicationStatus(user.id);
 
       // Fetch people (other users) with their interests and connection status
       await fetchPeople(user.id);
@@ -168,11 +236,58 @@ const USFDashboard = () => {
       // Fetch notifications
       await fetchNotifications(user.id);
 
+      // Fetch conversations
+      await fetchConversations(user.id);
+
       setLoading(false);
     };
 
     checkAuthAndFetchData();
   }, [router, supabase]);
+
+  const fetchJobsWithApplicationStatus = async (userId: string) => {
+    try {
+      // Get all jobs
+      const { data: jobs, error: jobsError } = await supabase
+        .from('job_posts')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      if (jobsError) {
+        console.error('Error fetching jobs:', jobsError);
+        return;
+      }
+
+      // Get application counts for each job
+      const jobIds = jobs?.map(job => job.id) || [];
+      const { data: applications, error: appError } = await supabase
+        .from('applications')
+        .select('job_id, applicant_id')
+        .in('job_id', jobIds);
+
+      if (appError) {
+        console.error('Error fetching applications:', appError);
+        setJobPosts(jobs || []);
+        return;
+      }
+
+      // Process jobs with application data
+      const jobsWithApplicationData = jobs?.map(job => {
+        const jobApplications = applications?.filter(app => app.job_id === job.id) || [];
+        const userApplied = jobApplications.some(app => app.applicant_id === userId);
+        
+        return {
+          ...job,
+          application_count: jobApplications.length,
+          user_applied: userApplied
+        };
+      }) || [];
+
+      setJobPosts(jobsWithApplicationData);
+    } catch (error) {
+      console.error('Error in fetchJobsWithApplicationStatus:', error);
+    }
+  };
 
   const fetchPeople = async (currentUserId: string) => {
     try {
@@ -247,6 +362,277 @@ const USFDashboard = () => {
       setNotifications(data || []);
     }
   };
+
+  const fetchConversations = async (userId: string) => {
+    try {
+      const { data: conversationsData, error } = await supabase
+        .from('conversations')
+        .select('*')
+        .or(`participant_1.eq.${userId},participant_2.eq.${userId}`)
+        .order('updated_at', { ascending: false });
+
+      if (error) {
+        console.error('Error fetching conversations:', error);
+        return;
+      }
+
+      // Get other participants' info and last messages
+      const conversationsWithDetails = await Promise.all(
+        conversationsData.map(async (conversation) => {
+          const otherUserId = conversation.participant_1 === userId 
+            ? conversation.participant_2 
+            : conversation.participant_1;
+
+          // Get other user's profile
+          const { data: otherUser } = await supabase
+            .from('profiles')
+            .select('id, full_name, profile_picture_url, major, graduation_year')
+            .eq('id', otherUserId)
+            .single();
+
+          // Get last message
+          const { data: lastMessage } = await supabase
+            .from('messages')
+            .select('content, sent_at, sender_id')
+            .eq('conversation_id', conversation.id)
+            .order('sent_at', { ascending: false })
+            .limit(1)
+            .single();
+
+          return {
+            ...conversation,
+            other_user: otherUser,
+            last_message: lastMessage
+          };
+        })
+      );
+
+      setConversations(conversationsWithDetails);
+    } catch (error) {
+      console.error('Error in fetchConversations:', error);
+    }
+  };
+
+  const fetchMessages = async (conversationId: string) => {
+    setMessagesLoading(true);
+    try {
+      const { data, error } = await supabase
+        .from('messages')
+        .select('*')
+        .eq('conversation_id', conversationId)
+        .order('sent_at', { ascending: true });
+
+      if (error) {
+        console.error('Error fetching messages:', error);
+        return;
+      }
+
+      setMessages(data || []);
+      
+      // Mark messages as read
+      await supabase
+        .from('messages')
+        .update({ is_read: true })
+        .eq('conversation_id', conversationId)
+        .neq('sender_id', userData?.id);
+
+    } catch (error) {
+      console.error('Error in fetchMessages:', error);
+    } finally {
+      setMessagesLoading(false);
+    }
+  };
+
+  const fetchJobApplications = async (jobId: string) => {
+    setApplicationsLoading(true);
+    try {
+      const { data, error } = await supabase
+        .from('applications')
+        .select(`
+          *,
+          applicant:profiles!applications_applicant_id_fkey(
+            full_name, email, major, graduation_year, gpa, phone,
+            profile_picture_url, linkedin_url, github_url, portfolio_url,
+            resume_url, bio
+          ),
+          job:job_posts!applications_job_id_fkey(title, company)
+        `)
+        .eq('job_id', jobId)
+        .order('applied_at', { ascending: false });
+
+      if (error) {
+        console.error('Error fetching applications:', error);
+        return;
+      }
+
+      setJobApplications(data || []);
+    } catch (error) {
+      console.error('Error in fetchJobApplications:', error);
+    } finally {
+      setApplicationsLoading(false);
+    }
+  };
+
+  const sendMessage = async (e: FormEvent) => {
+    e.preventDefault();
+    if (!newMessage.trim() || !selectedConversation || !userData?.id) return;
+
+    try {
+      const { error } = await supabase
+        .from('messages')
+        .insert({
+          conversation_id: selectedConversation,
+          sender_id: userData.id,
+          content: newMessage.trim()
+        });
+
+      if (error) {
+        console.error('Error sending message:', error);
+        return;
+      }
+
+      // Update conversation's updated_at
+      await supabase
+        .from('conversations')
+        .update({ updated_at: new Date().toISOString() })
+        .eq('id', selectedConversation);
+
+      setNewMessage('');
+      await fetchMessages(selectedConversation);
+      await fetchConversations(userData.id);
+    } catch (error) {
+      console.error('Error in sendMessage:', error);
+    }
+  };
+
+  const startConversation = async (otherUserId: string) => {
+    if (!userData?.id) return;
+
+    try {
+      // Check if conversation already exists
+      const { data: existingConversation } = await supabase
+        .from('conversations')
+        .select('id')
+        .or(`and(participant_1.eq.${userData.id},participant_2.eq.${otherUserId}),and(participant_1.eq.${otherUserId},participant_2.eq.${userData.id})`)
+        .single();
+
+      if (existingConversation) {
+        setSelectedConversation(existingConversation.id);
+        setActiveTab('messages');
+        await fetchMessages(existingConversation.id);
+        return;
+      }
+
+      // Create new conversation
+      const { data: newConversation, error } = await supabase
+        .from('conversations')
+        .insert({
+          participant_1: userData.id,
+          participant_2: otherUserId
+        })
+        .select()
+        .single();
+
+      if (error) {
+        console.error('Error creating conversation:', error);
+        return;
+      }
+
+      setSelectedConversation(newConversation.id);
+      setActiveTab('messages');
+      await fetchConversations(userData.id);
+    } catch (error) {
+      console.error('Error in startConversation:', error);
+    }
+  };
+
+  const handleJobApplication = async (job: JobPost) => {
+    setSelectedJobForApplication(job);
+    setShowApplicationModal(true);
+  };
+
+  const submitJobApplication = async (e: FormEvent) => {
+    e.preventDefault();
+    if (!selectedJobForApplication || !userData?.id) return;
+
+    setApplicationLoading(true);
+    try {
+      const { error } = await supabase
+        .from('applications')
+        .insert({
+          job_id: selectedJobForApplication.id,
+          applicant_id: userData.id,
+          cover_letter: applicationForm.cover_letter,
+          status: 'pending'
+        });
+
+      if (error) {
+        console.error('Error submitting application:', error);
+        return;
+      }
+
+      // Create notification for job poster
+      if (selectedJobForApplication.posted_by) {
+        await supabase
+          .from('notifications')
+          .insert({
+            user_id: selectedJobForApplication.posted_by,
+            type: 'job_application',
+            title: 'New Job Application',
+            message: `${userData.name} applied for ${selectedJobForApplication.title}`,
+            related_id: selectedJobForApplication.id
+          });
+      }
+
+      // Refresh job posts to update application status
+      await fetchJobsWithApplicationStatus(userData.id);
+      
+      setShowApplicationModal(false);
+      setApplicationForm({ cover_letter: '' });
+      
+    } catch (error) {
+      console.error('Error in submitJobApplication:', error);
+    } finally {
+      setApplicationLoading(false);
+    }
+  };
+
+  const viewJobApplications = async (job: JobPost) => {
+    setSelectedJobForApplications(job);
+    setShowApplicationsModal(true);
+    await fetchJobApplications(job.id);
+  };
+
+  const updateApplicationStatus = async (applicationId: string, status: string) => {
+    try {
+      const { error } = await supabase
+        .from('applications')
+        .update({ status })
+        .eq('id', applicationId);
+
+      if (error) {
+        console.error('Error updating application status:', error);
+        return;
+      }
+
+      // Refresh applications
+      if (selectedJobForApplications) {
+        await fetchJobApplications(selectedJobForApplications.id);
+      }
+    } catch (error) {
+      console.error('Error in updateApplicationStatus:', error);
+    }
+  };
+
+  useEffect(() => {
+    if (selectedConversation) {
+      fetchMessages(selectedConversation);
+    }
+  }, [selectedConversation]);
+
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages]);
 
   const sendConnectionRequest = async (receiverId: string) => {
     if (!userData?.id) return;
@@ -336,7 +722,7 @@ const USFDashboard = () => {
         setJobError('Failed to post job: ' + (error.message || 'Unknown error'));
         console.error('Supabase insert error:', error);
       } else if (data && data.length > 0) {
-        setJobPosts((prev) => [data[0] as JobPost, ...prev]);
+        await fetchJobsWithApplicationStatus(user.id);
         setJobForm({
           title: '', company: '', location: '', job_type: '', industry: '',
           description: '', requirements: '', salary_range: '', hours_per_week: '',
@@ -395,8 +781,19 @@ const USFDashboard = () => {
         <p className="text-gray-500 text-sm mb-2">Apply by: {new Date(job.application_deadline).toLocaleDateString()}</p>
       )}
 
-      <div className="flex items-center justify-between mt-2">
-        <div />
+      <div className="flex items-center justify-between mt-4">
+        <div className="flex items-center space-x-2 text-sm text-gray-500">
+          <span>{job.application_count || 0} applications</span>
+          {job.posted_by === userData?.id && (
+            <button
+              onClick={() => viewJobApplications(job)}
+              className="text-blue-600 hover:text-blue-800 flex items-center"
+            >
+              <Eye className="w-4 h-4 mr-1" />
+              View Applications
+            </button>
+          )}
+        </div>
         <div className="flex space-x-2">
           <button className="p-2 text-gray-400 hover:text-red-500 transition-colors">
             <Heart className="w-4 h-4" />
@@ -404,9 +801,19 @@ const USFDashboard = () => {
           <button className="p-2 text-gray-400 hover:text-gray-600 transition-colors">
             <Bookmark className="w-4 h-4" />
           </button>
-          <button className="bg-green-600 text-white px-4 py-2 rounded-lg text-sm hover:bg-green-700 transition-colors">
-            Apply Now
-          </button>
+          {job.posted_by !== userData?.id && (
+            <button
+              onClick={() => handleJobApplication(job)}
+              disabled={job.user_applied}
+              className={`px-4 py-2 rounded-lg text-sm transition-colors ${
+                job.user_applied
+                  ? 'bg-gray-300 text-gray-600 cursor-not-allowed'
+                  : 'bg-green-600 text-white hover:bg-green-700'
+              }`}
+            >
+              {job.user_applied ? 'Applied' : 'Apply Now'}
+            </button>
+          )}
         </div>
       </div>
     </div>
@@ -467,6 +874,7 @@ const USFDashboard = () => {
         )}
         {person.connectionStatus === 'connected' && (
           <button
+            onClick={() => startConversation(person.id)}
             className="flex-1 bg-blue-600 text-white py-2 px-4 rounded-lg text-sm hover:bg-blue-700 transition-colors"
           >
             Message
@@ -508,6 +916,388 @@ const USFDashboard = () => {
       </div>
     </div>
   );
+
+  const ApplicationModal = () => (
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+      <div className="bg-white rounded-xl p-6 w-full max-w-md mx-4">
+        <div className="flex justify-between items-center mb-4">
+          <h2 className="text-xl font-semibold">Apply for {selectedJobForApplication?.title}</h2>
+          <button
+            onClick={() => setShowApplicationModal(false)}
+            className="p-2 hover:bg-gray-100 rounded-full"
+          >
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+        
+        <form onSubmit={submitJobApplication} className="space-y-4">
+          <div>
+            <label htmlFor="cover_letter" className="block text-sm font-medium text-gray-700 mb-2">
+              Cover Letter
+            </label>
+            <textarea
+              id="cover_letter"
+              value={applicationForm.cover_letter}
+              onChange={(e) => setApplicationForm({ cover_letter: e.target.value })}
+              placeholder="Tell the employer why you're perfect for this role..."
+              className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500 outline-none"
+              rows={5}
+              required
+            />
+          </div>
+          
+          <div className="flex space-x-3">
+            <button
+              type="button"
+              onClick={() => setShowApplicationModal(false)}
+              className="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={applicationLoading}
+              className="flex-1 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:bg-gray-400 transition-colors"
+            >
+              {applicationLoading ? 'Submitting...' : 'Submit Application'}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+
+  const ApplicationsModal = () => (
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+      <div className="bg-white rounded-xl p-6 w-full max-w-4xl mx-4 max-h-[80vh] overflow-y-auto">
+        <div className="flex justify-between items-center mb-6">
+          <div>
+            <h2 className="text-xl font-semibold">Applications for {selectedJobForApplications?.title}</h2>
+            <p className="text-gray-600">{selectedJobForApplications?.company}</p>
+          </div>
+          <button
+            onClick={() => setShowApplicationsModal(false)}
+            className="p-2 hover:bg-gray-100 rounded-full"
+          >
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+        
+        {applicationsLoading ? (
+          <div className="flex justify-center py-8">
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-green-600"></div>
+          </div>
+        ) : jobApplications.length === 0 ? (
+          <div className="text-center py-8 text-gray-500">
+            <FileText className="w-12 h-12 mx-auto mb-4 text-gray-300" />
+            <p>No applications yet</p>
+          </div>
+        ) : (
+          <div className="space-y-4">
+            {jobApplications.map(application => (
+              <div key={application.id} className="border border-gray-200 rounded-lg p-6">
+                <div className="flex items-start space-x-4">
+                  <div className="w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center">
+                    {application.applicant.profile_picture_url ? (
+                      <img
+                        src={application.applicant.profile_picture_url}
+                        alt={application.applicant.full_name}
+                        className="w-16 h-16 rounded-full object-cover"
+                      />
+                    ) : (
+                      <User className="w-8 h-8 text-blue-600" />
+                    )}
+                  </div>
+                  
+                  <div className="flex-1">
+                    <div className="flex justify-between items-start mb-2">
+                      <div>
+                        <h3 className="font-semibold text-lg text-gray-900">
+                          {application.applicant.full_name}
+                        </h3>
+                        <p className="text-gray-600">
+                          {application.applicant.major} • Class of {application.applicant.graduation_year}
+                        </p>
+                        {application.applicant.gpa && (
+                          <p className="text-gray-500 text-sm">GPA: {application.applicant.gpa}</p>
+                        )}
+                      </div>
+                      
+                      <div className="flex items-center space-x-2">
+                        <span className={`px-3 py-1 rounded-full text-xs font-medium ${
+                          application.status === 'pending' ? 'bg-yellow-100 text-yellow-800' :
+                          application.status === 'reviewed' ? 'bg-blue-100 text-blue-800' :
+                          application.status === 'accepted' ? 'bg-green-100 text-green-800' :
+                          'bg-red-100 text-red-800'
+                        }`}>
+                          {application.status}
+                        </span>
+                        
+                        <div className="relative">
+                          <select
+                            value={application.status}
+                            onChange={(e) => updateApplicationStatus(application.id, e.target.value)}
+                            className="appearance-none bg-white border border-gray-300 rounded px-3 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-green-500 pr-8"
+                          >
+                            <option value="pending">Pending</option>
+                            <option value="reviewed">Reviewed</option>
+                            <option value="accepted">Accepted</option>
+                            <option value="rejected">Rejected</option>
+                          </select>
+                          <ChevronDown className="w-4 h-4 absolute right-2 top-1/2 transform -translate-y-1/2 text-gray-400 pointer-events-none" />
+                        </div>
+                      </div>
+                    </div>
+                    
+                    <div className="grid grid-cols-2 gap-4 mb-4">
+                      <div>
+                        <p className="text-sm text-gray-500">Contact</p>
+                        <div className="flex items-center space-x-2 text-sm">
+                          <Mail className="w-4 h-4 text-gray-400" />
+                          <span>{application.applicant.email}</span>
+                        </div>
+                        {application.applicant.phone && (
+                          <div className="flex items-center space-x-2 text-sm">
+                            <Phone className="w-4 h-4 text-gray-400" />
+                            <span>{application.applicant.phone}</span>
+                          </div>
+                        )}
+                      </div>
+                      
+                      <div>
+                        <p className="text-sm text-gray-500">Links</p>
+                        <div className="space-y-1">
+                          {application.applicant.linkedin_url && (
+                            <a
+                              href={application.applicant.linkedin_url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="flex items-center space-x-2 text-sm text-blue-600 hover:text-blue-800"
+                            >
+                              <ExternalLink className="w-4 h-4" />
+                              <span>LinkedIn</span>
+                            </a>
+                          )}
+                          {application.applicant.github_url && (
+                            <a
+                              href={application.applicant.github_url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="flex items-center space-x-2 text-sm text-blue-600 hover:text-blue-800"
+                            >
+                              <ExternalLink className="w-4 h-4" />
+                              <span>GitHub</span>
+                            </a>
+                          )}
+                          {application.applicant.portfolio_url && (
+                            <a
+                              href={application.applicant.portfolio_url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="flex items-center space-x-2 text-sm text-blue-600 hover:text-blue-800"
+                            >
+                              <ExternalLink className="w-4 h-4" />
+                              <span>Portfolio</span>
+                            </a>
+                          )}
+                          {application.applicant.resume_url && (
+                            <a
+                              href={application.applicant.resume_url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="flex items-center space-x-2 text-sm text-blue-600 hover:text-blue-800"
+                            >
+                              <FileText className="w-4 h-4" />
+                              <span>Resume</span>
+                            </a>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                    
+                    {application.applicant.bio && (
+                      <div className="mb-4">
+                        <p className="text-sm text-gray-500 mb-1">Bio</p>
+                        <p className="text-sm text-gray-700">{application.applicant.bio}</p>
+                      </div>
+                    )}
+                    
+                    <div>
+                      <p className="text-sm text-gray-500 mb-1">Cover Letter</p>
+                      <div className="bg-gray-50 rounded-lg p-3">
+                        <p className="text-sm text-gray-700">{application.cover_letter}</p>
+                      </div>
+                    </div>
+                    
+                    <p className="text-xs text-gray-400 mt-2">
+                      Applied on {new Date(application.applied_at).toLocaleDateString()}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+
+  const ConversationsList = () => (
+    <div className="space-y-2">
+      {conversations.length === 0 ? (
+        <div className="text-center py-8 text-gray-500">
+          <MessageCircle className="w-12 h-12 mx-auto mb-4 text-gray-300" />
+          <p>No conversations yet</p>
+          <p className="text-sm">Connect with people to start messaging!</p>
+        </div>
+      ) : (
+        conversations.map(conversation => (
+          <div
+            key={conversation.id}
+            onClick={() => setSelectedConversation(conversation.id)}
+            className={`p-4 rounded-lg border cursor-pointer transition-colors ${
+              selectedConversation === conversation.id
+                ? 'bg-green-50 border-green-200'
+                : 'bg-white border-gray-100 hover:bg-gray-50'
+            }`}
+          >
+            <div className="flex items-center space-x-3">
+              <div className="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center">
+                {conversation.other_user?.profile_picture_url ? (
+                  <img
+                    src={conversation.other_user.profile_picture_url}
+                    alt={conversation.other_user.full_name}
+                    className="w-10 h-10 rounded-full object-cover"
+                  />
+                ) : (
+                  <User className="w-5 h-5 text-blue-600" />
+                )}
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center justify-between">
+                  <h3 className="font-medium text-gray-900 truncate">
+                    {conversation.other_user?.full_name}
+                  </h3>
+                  <span className="text-xs text-gray-500">
+                    {conversation.last_message?.sent_at &&
+                      new Date(conversation.last_message.sent_at).toLocaleDateString()}
+                  </span>
+                </div>
+                <p className="text-sm text-gray-600 truncate">
+                  {conversation.other_user?.major} • Class of {conversation.other_user?.graduation_year}
+                </p>
+                {conversation.last_message && (
+                  <p className="text-sm text-gray-500 truncate mt-1">
+                    {conversation.last_message.sender_id === userData?.id ? 'You: ' : ''}
+                    {conversation.last_message.content}
+                  </p>
+                )}
+              </div>
+            </div>
+          </div>
+        ))
+      )}
+    </div>
+  );
+
+  const ChatWindow = () => {
+    const currentConversation = conversations.find(c => c.id === selectedConversation);
+
+    if (!currentConversation) return null;
+
+    return (
+      <div className="bg-white rounded-xl shadow-sm border border-gray-100 flex flex-col h-96">
+        {/* Chat Header */}
+        <div className="p-4 border-b border-gray-200 flex items-center space-x-3">
+          <button
+            onClick={() => setSelectedConversation(null)}
+            className="p-1 hover:bg-gray-100 rounded"
+          >
+            <ArrowLeft className="w-5 h-5" />
+          </button>
+          <div className="w-8 h-8 bg-blue-100 rounded-full flex items-center justify-center">
+            {currentConversation.other_user?.profile_picture_url ? (
+              <img
+                src={currentConversation.other_user.profile_picture_url}
+                alt={currentConversation.other_user.full_name}
+                className="w-8 h-8 rounded-full object-cover"
+              />
+            ) : (
+              <User className="w-4 h-4 text-blue-600" />
+            )}
+          </div>
+          <div>
+            <h3 className="font-medium text-gray-900">
+              {currentConversation.other_user?.full_name}
+            </h3>
+            <p className="text-xs text-gray-500">
+              {currentConversation.other_user?.major} • Class of {currentConversation.other_user?.graduation_year}
+            </p>
+          </div>
+        </div>
+
+        {/* Messages */}
+        <div className="flex-1 overflow-y-auto p-4 space-y-3">
+          {messagesLoading ? (
+            <div className="flex justify-center py-4">
+              <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-green-600"></div>
+            </div>
+          ) : messages.length === 0 ? (
+            <div className="text-center py-8 text-gray-500">
+              <p>No messages yet</p>
+              <p className="text-sm">Send a message to start the conversation!</p>
+            </div>
+          ) : (
+            messages.map(message => (
+              <div
+                key={message.id}
+                className={`flex ${message.sender_id === userData?.id ? 'justify-end' : 'justify-start'}`}
+              >
+                <div
+                  className={`max-w-xs px-4 py-2 rounded-lg ${
+                    message.sender_id === userData?.id
+                      ? 'bg-green-600 text-white'
+                      : 'bg-gray-100 text-gray-900'
+                  }`}
+                >
+                  <p className="text-sm">{message.content}</p>
+                  <p className={`text-xs mt-1 ${
+                    message.sender_id === userData?.id ? 'text-green-200' : 'text-gray-500'
+                  }`}>
+                    {new Date(message.sent_at).toLocaleTimeString([], { 
+                      hour: '2-digit', 
+                      minute: '2-digit' 
+                    })}
+                  </p>
+                </div>
+              </div>
+            ))
+          )}
+          <div ref={messagesEndRef} />
+        </div>
+
+        {/* Message Input */}
+        <form onSubmit={sendMessage} className="p-4 border-t border-gray-200">
+          <div className="flex space-x-2">
+            <input
+              type="text"
+              value={newMessage}
+              onChange={(e) => setNewMessage(e.target.value)}
+              placeholder="Type a message..."
+              className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500 outline-none"
+            />
+            <button
+              type="submit"
+              disabled={!newMessage.trim()}
+              className="bg-green-600 text-white p-2 rounded-lg hover:bg-green-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
+            >
+              <Send className="w-4 h-4" />
+            </button>
+          </div>
+        </form>
+      </div>
+    );
+  };
 
   const NotificationDropdown = () => (
     <div className="absolute right-0 mt-2 w-80 bg-white rounded-lg shadow-lg border border-gray-200 z-50">
@@ -730,16 +1520,35 @@ const USFDashboard = () => {
               )}
 
               {activeTab === 'messages' && (
-                <div className="bg-white rounded-xl p-8 shadow-sm border border-gray-100 text-center">
-                  <MessageCircle className="w-12 h-12 text-gray-400 mx-auto mb-4" />
-                  <h3 className="text-lg font-semibold text-gray-900 mb-2">No messages yet</h3>
-                  <p className="text-gray-600">Start connecting with people to begin conversations!</p>
+                <div className="grid lg:grid-cols-2 gap-6">
+                  {/* Conversations List */}
+                  <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100">
+                    <h3 className="text-lg font-semibold text-gray-900 mb-4">Conversations</h3>
+                    <ConversationsList />
+                  </div>
+
+                  {/* Chat Window */}
+                  <div className="lg:col-span-1">
+                    {selectedConversation ? (
+                      <ChatWindow />
+                    ) : (
+                      <div className="bg-white rounded-xl p-8 shadow-sm border border-gray-100 text-center">
+                        <MessageCircle className="w-12 h-12 text-gray-400 mx-auto mb-4" />
+                        <h3 className="text-lg font-semibold text-gray-900 mb-2">Select a conversation</h3>
+                        <p className="text-gray-600">Choose a conversation to start messaging!</p>
+                      </div>
+                    )}
+                  </div>
                 </div>
               )}
             </div>
           </div>
         </div>
       </div>
+
+      {/* Modals */}
+      {showApplicationModal && <ApplicationModal />}
+      {showApplicationsModal && <ApplicationsModal />}
     </div>
   );
 };
